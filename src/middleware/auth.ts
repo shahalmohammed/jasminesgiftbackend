@@ -1,20 +1,18 @@
-import { Request, Response, NextFunction } from "express";
-import { verifyJwt } from "../utils/jwt";
+import type { Request, Response, NextFunction } from "express";
+import { verifyJwt, AppJwtPayload } from "../utils/jwt";
 
 export interface AuthRequest extends Request {
-  user?: { id: string; role: "user" | "admin" };
+  userId?: string;
+  userRole?: "admin" | "user";
 }
 
-export const auth = (req: AuthRequest, res: Response, next: NextFunction) => {
+export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) return res.status(401).json({ message: "Missing token" });
+  if (!header?.startsWith("Bearer ")) return res.status(401).json({ message: "Unauthorized" });
 
-  const token = header.split(" ")[1];
-  try {
-    const payload = verifyJwt(token);
-    req.user = { id: payload.sub, role: payload.role };
-    next();
-  } catch {
-    return res.status(401).json({ message: "Invalid or expired token" });
-  }
-};
+  const token = header.slice("Bearer ".length);
+  const payload = verifyJwt<AppJwtPayload>(token); // <-- typed
+  req.userId = payload.sub;
+  req.userRole = payload.role;
+  next();
+}
