@@ -11,7 +11,12 @@ app.use(express.json());
 app.get("/", (_req, res) => res.send("Auth API is running"));
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
-app.use(cors({ origin: ["http://localhost:5173", "http://localhost:8080"] })); // adjust to your dev port
+app.use(cors({
+  origin: ["http://localhost:5173", "http://localhost:8080"], 
+  credentials: true,
+  allowedHeaders: ["Authorization", "Content-Type"],
+  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+}));
 
 connectDB().then(() => {
   app.listen(Number(env.PORT), () => {

@@ -12,8 +12,7 @@ if (!JWT_SECRET) {
 }
 
 export function signJwt(payload: object, options?: SignOptions) {
-  // JWT_SECRET is a guaranteed string
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "15m", ...options });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "1d", ...options });
 }
 
 export function verifyJwt<T extends object = AppJwtPayload>(token: string): T {
