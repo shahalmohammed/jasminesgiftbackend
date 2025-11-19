@@ -5,29 +5,31 @@ import * as Product from "../controllers/product.controller";
 import { requireAuth } from "../middleware/auth";
 import { requireRole } from "../middleware/requireRole";
 
-const upload = multer({ storage: multer.memoryStorage() });
 const router = Router();
+
+// Multer: accept any file field; controller will limit to 5 images
+const storage = multer.memoryStorage();
+const upload = multer({ storage }).any();
 
 // Public routes
 router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-// CREATE — accept files from any field, limit handled in controller
+// Admin routes – note `upload` only on create / update
 router.post(
   "/",
   requireAuth,
   requireRole(["admin"]),
-  upload.any(),
+  upload,
   Product.createProduct
 );
 
-// UPDATE — accept files from any field, limit handled in controller
 router.patch(
   "/:id",
   requireAuth,
   requireRole(["admin"]),
-  upload.any(),
+  upload,
   Product.updateProduct
 );
 
