@@ -8,21 +8,22 @@ import { requireRole } from "../middleware/requireRole";
 const router = Router();
 
 const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
-// accept up to 5 files from field name "images"
-const upload = multer({ storage }).array("images", 5);
+// Change from .array() to .any()
+const uploadAny = upload.any();
 
 // Public routes
 router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-// Admin routes
+// Admin routes - use uploadAny instead of upload
 router.post(
   "/",
   requireAuth,
   requireRole(["admin"]),
-  upload,
+  uploadAny,  // Changed here
   Product.createProduct
 );
 
@@ -30,7 +31,7 @@ router.patch(
   "/:id",
   requireAuth,
   requireRole(["admin"]),
-  upload,
+  uploadAny,  // Changed here
   Product.updateProduct
 );
 
