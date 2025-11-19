@@ -2,8 +2,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { Product } from "../models/Product";
-import { uploadToR2 } from "../services/r2";
-
+import { uploadToR2, deleteFromR2 } from "../services/r2";
 const PriceField = z.coerce.number().min(0).optional();
 
 const CreateSchema = z.object({
@@ -27,119 +26,72 @@ const QuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(10),
 });
 
-// Create product – up to 5 images
 export const createProduct = async (req: Request, res: Response) => {
-  try {
+    // expects multipart/form-data with: fields (name, description?, price?) and file "image"
     const parsed = CreateSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ errors: parsed.error.flatten().fieldErrors });
-    }
+    if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
 
+    // Optional image upload
     let imageUrl: string | undefined;
-    let images: string[] = [];
+    let r2Key: string | undefined;
 
-    const files = (req as any).files as Express.Multer.File[] | undefined;
-    const singleFile = (req as any).file as Express.Multer.File | undefined;
-
-    if (files && files.length > 0) {
-      const limited = files.slice(0, 5);
-      const uploads = await Promise.all(
-        limited.map((file) =>
-          uploadToR2({
+    if ((req as any).file) {
+        const file = (req as any).file as Express.Multer.File;
+        const { key, url } = await uploadToR2({
             buffer: file.buffer,
             mime: file.mimetype,
             prefix: "products/",
-            ext: "." + (file.originalname.split(".").pop() || "bin"),
-          })
-        )
-      );
-
-      images = uploads.map((u) => u.url);
-      imageUrl = images[0];
-    } else if (singleFile) {
-      // fallback if some client still sends single "image"
-      const file = singleFile;
-      const { url } = await uploadToR2({
-        buffer: file.buffer,
-        mime: file.mimetype,
-        prefix: "products/",
-        ext: "." + (file.originalname.split(".").pop() || "bin"),
-      });
-      imageUrl = url;
-      images = [url];
+            ext: "." + (file.originalname.split(".").pop() || "bin")
+        });
+        imageUrl = url;
+        r2Key = key;
     }
 
     const prod = await Product.create({
-      name: parsed.data.name,
-      description: parsed.data.description,
-      price: parsed.data.price,
-      imageUrl,
-      images,
+        name: parsed.data.name,
+        description: parsed.data.description,
+        price: parsed.data.price,
+        imageUrl,
+        // Optionally save r2Key if you want deletion-by-key later:
+        // r2Key,
     });
 
     return res.status(201).json({ product: prod });
-  } catch (err: any) {
-    console.error("createProduct error:", err);
-    return res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
 
+// List products
 export const listProducts = async (req: Request, res: Response) => {
-  try {
     const parsed = QuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ errors: parsed.error.flatten().fieldErrors });
-    }
+    if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
 
-    const { search, page, limit } = parsed.data;
-    const filter: any = {};
+  const { search, page, limit } = parsed.data;
+  const filter: any = {};
 
     if (search && search.trim()) {
-      const regex = new RegExp(search.trim(), "i");
-      filter.$or = [{ name: regex }, { description: regex }];
+        const regex = new RegExp(search.trim(), "i");
+        filter.$or = [{ name: regex }, { description: regex }];
     }
 
     const [items, total] = await Promise.all([
-      Product.find(filter)
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit),
-      Product.countDocuments(filter),
+        Product.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+        Product.countDocuments(filter),
     ]);
 
     return res.json({
-      page,
-      limit,
-      total,
-      items,
+        page,
+        limit,
+        total,
+        items,
     });
-  } catch (err: any) {
-    console.error("listProducts error:", err);
-    return res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
 
+// Get popular products
 export const getPopularProducts = async (_req: Request, res: Response) => {
-  try {
-    const items = await Product.find({ isActive: true, isPopular: true }).sort(
-      { createdAt: -1 }
-    );
+    const items = await Product.find({ isActive: true, isPopular: true })
+        .sort({ createdAt: -1 }); // optional: sort by recency
     return res.json({ items });
-  } catch (err: any) {
-    console.error("getPopularProducts error:", err);
-    return res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
+
 
 export const togglePopular = async (req: Request, res: Response) => {
   try {
@@ -149,118 +101,66 @@ export const togglePopular = async (req: Request, res: Response) => {
     product.isPopular = !product.isPopular;
     await product.save();
 
-    res.json({
-      product,
-      message: `Product marked as ${
-        product.isPopular ? "popular" : "not popular"
-      }`,
-    });
-  } catch (err: any) {
-    console.error("togglePopular error:", err);
-    res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
+        res.json({
+            product,
+            message: `Product marked as ${product.isPopular ? "popular" : "not popular"}`,
+        });
+    } catch (err) {
+        console.error("Toggle popular error:", err);
+        res.status(500).json({ message: "Server error" });
+    }
 };
 
+
 export const getProduct = async (req: Request, res: Response) => {
-  try {
     const p = await Product.findById(req.params.id);
     if (!p) return res.status(404).json({ message: "Not found" });
     res.json({ product: p });
-  } catch (err: any) {
-    console.error("getProduct error:", err);
-    res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
 
-// Update product – up to 5 images
 export const updateProduct = async (req: Request, res: Response) => {
-  try {
     const parsed = UpdateSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ errors: parsed.error.flatten().fieldErrors });
-    }
+    if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
 
-    const p = await Product.findById(req.params.id);
-    if (!p) return res.status(404).json({ message: "Not found" });
+  const p = await Product.findById(req.params.id);
+  if (!p) return res.status(404).json({ message: "Not found" });
 
-    const files = (req as any).files as Express.Multer.File[] | undefined;
-    const singleFile = (req as any).file as Express.Multer.File | undefined;
-
-    if (files && files.length > 0) {
-      const limited = files.slice(0, 5);
-      const uploads = await Promise.all(
-        limited.map((file) =>
-          uploadToR2({
+    // If new image uploaded, replace it
+    if ((req as any).file) {
+        const file = (req as any).file as Express.Multer.File;
+        const { url } = await uploadToR2({
             buffer: file.buffer,
             mime: file.mimetype,
             prefix: "products/",
-            ext: "." + (file.originalname.split(".").pop() || "bin"),
-          })
-        )
-      );
-
-      const urls = uploads.map((u) => u.url);
-      p.imageUrl = urls[0];
-      (p as any).images = urls;
-    } else if (singleFile) {
-      const file = singleFile;
-      const { url } = await uploadToR2({
-        buffer: file.buffer,
-        mime: file.mimetype,
-        prefix: "products/",
-        ext: "." + (file.originalname.split(".").pop() || "bin"),
-      });
-      p.imageUrl = url;
-      (p as any).images = [url];
+            ext: "." + (file.originalname.split(".").pop() || "bin")
+        });
+        p.imageUrl = url;
+        // If you saved keys earlier, delete old one here with deleteFromR2(oldKey)
     }
-    // if no files: keep existing images
 
     Object.assign(p, parsed.data);
     await p.save();
     res.json({ product: p });
-  } catch (err: any) {
-    console.error("updateProduct error:", err);
-    res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
 
+// Delete product
 export const deleteProduct = async (req: Request, res: Response) => {
-  try {
     const p = await Product.findById(req.params.id);
     if (!p) return res.status(404).json({ message: "Not found" });
 
+    // If you saved r2Key in the doc, call deleteFromR2(p.r2Key)
     await p.deleteOne();
     res.json({ ok: true });
-  } catch (err: any) {
-    console.error("deleteProduct error:", err);
-    res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
 
+// Simple “record a sale” endpoint to increment salesCount (for top-5)
 export const addSale = async (req: Request, res: Response) => {
-  try {
     const qty = Math.max(1, Number(req.query.qty) || 1);
     const p = await Product.findByIdAndUpdate(
-      req.params.id,
-      { $inc: { salesCount: qty } },
-      { new: true }
+        req.params.id,
+        { $inc: { salesCount: qty } },
+        { new: true }
     );
     if (!p) return res.status(404).json({ message: "Not found" });
     res.json({ product: p });
-  } catch (err: any) {
-    console.error("addSale error:", err);
-    res
-      .status(500)
-      .json({ message: "Internal Server Error", error: err?.message });
-  }
 };
