@@ -13,27 +13,21 @@ router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-// CREATE — allow up to 5 images under "images" and optionally single "image"
+// CREATE — accept files from any field, limit handled in controller
 router.post(
   "/",
   requireAuth,
   requireRole(["admin"]),
-  upload.fields([
-    { name: "images", maxCount: 5 },
-    { name: "image", maxCount: 1 }, // legacy / single-file field
-  ]),
+  upload.any(),
   Product.createProduct
 );
 
-// UPDATE — allow up to 5 images under "images" and optionally single "image"
+// UPDATE — accept files from any field, limit handled in controller
 router.patch(
   "/:id",
   requireAuth,
   requireRole(["admin"]),
-  upload.fields([
-    { name: "images", maxCount: 5 },
-    { name: "image", maxCount: 1 },
-  ]),
+  upload.any(),
   Product.updateProduct
 );
 

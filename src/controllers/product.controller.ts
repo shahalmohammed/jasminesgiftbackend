@@ -27,13 +27,7 @@ const QuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(10),
 });
 
-// For multer.fields([{ name: "images" }, { name: "image" }])
-type MulterFiles = {
-  images?: Express.Multer.File[];
-  image?: Express.Multer.File[];
-};
-
-// Create product – up to 5 images
+// Create product – up to 5 images (from any file field)
 export const createProduct = async (req: Request, res: Response) => {
   try {
     const parsed = CreateSchema.safeParse(req.body);
@@ -46,9 +40,7 @@ export const createProduct = async (req: Request, res: Response) => {
     let imageUrl: string | undefined;
     let images: string[] = [];
 
-    const filesField = (req as any).files as MulterFiles | undefined;
-    const files = filesField?.images;
-    const singleFile = filesField?.image?.[0];
+    const files = (req as any).files as Express.Multer.File[] | undefined;
 
     if (files && files.length > 0) {
       const limited = files.slice(0, 5);
@@ -65,17 +57,6 @@ export const createProduct = async (req: Request, res: Response) => {
 
       images = uploads.map((u) => u.url);
       imageUrl = images[0];
-    } else if (singleFile) {
-      // fallback single "image" field
-      const file = singleFile;
-      const { url } = await uploadToR2({
-        buffer: file.buffer,
-        mime: file.mimetype,
-        prefix: "products/",
-        ext: "." + (file.originalname.split(".").pop() || "bin"),
-      });
-      imageUrl = url;
-      images = [url];
     }
 
     const prod = await Product.create({
@@ -84,7 +65,6 @@ export const createProduct = async (req: Request, res: Response) => {
       price: parsed.data.price,
       imageUrl,
       images,
-      // allow creating as popular if provided
       isPopular: parsed.data.isPopular ?? false,
     });
 
@@ -185,7 +165,7 @@ export const getProduct = async (req: Request, res: Response) => {
   }
 };
 
-// Update product – up to 5 images
+// Update product – up to 5 images (from any file field)
 export const updateProduct = async (req: Request, res: Response) => {
   try {
     const parsed = UpdateSchema.safeParse(req.body);
@@ -198,9 +178,7 @@ export const updateProduct = async (req: Request, res: Response) => {
     const p = await Product.findById(req.params.id);
     if (!p) return res.status(404).json({ message: "Not found" });
 
-    const filesField = (req as any).files as MulterFiles | undefined;
-    const files = filesField?.images;
-    const singleFile = filesField?.image?.[0];
+    const files = (req as any).files as Express.Multer.File[] | undefined;
 
     if (files && files.length > 0) {
       const limited = files.slice(0, 5);
@@ -218,16 +196,6 @@ export const updateProduct = async (req: Request, res: Response) => {
       const urls = uploads.map((u) => u.url);
       p.imageUrl = urls[0];
       (p as any).images = urls;
-    } else if (singleFile) {
-      const file = singleFile;
-      const { url } = await uploadToR2({
-        buffer: file.buffer,
-        mime: file.mimetype,
-        prefix: "products/",
-        ext: "." + (file.originalname.split(".").pop() || "bin"),
-      });
-      p.imageUrl = url;
-      (p as any).images = [url];
     }
     // if no files: keep existing images
 
@@ -261,7 +229,7 @@ export const addSale = async (req: Request, res: Response) => {
   try {
     const raw = Number(req.query.qty);
     const qty =
-      Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1; // always at least 1, never NaN
+      Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1; // at least 1, never NaN
 
     const p = await Product.findByIdAndUpdate(
       req.params.id,
