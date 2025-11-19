@@ -17,26 +17,27 @@ const UpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   price: PriceField,
-  isActive: z.boolean().optional(),
+  isActive: z.coerce.boolean().optional(),
   isPopular: z.coerce.boolean().optional(),
 });
 
 const QuerySchema = z.object({
   search: z.string().optional(),
-  page: z.coerce.number().min(1).default(1),
-  limit: z.coerce.number().min(1).max(100).default(10),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
 });
+
+// For multer.fields([{ name: "images" }, { name: "image" }])
+type MulterFiles = {
+  images?: Express.Multer.File[];
+  image?: Express.Multer.File[];
+};
 
 // Create product – up to 5 images
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    console.log("createProduct: incoming body", req.body);
-    console.log("createProduct: incoming files", (req as any).files);
-    console.log("createProduct: incoming file (single)", (req as any).file);
-
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
-      console.error("createProduct: validation error", parsed.error.format());
       return res
         .status(400)
         .json({ errors: parsed.error.flatten().fieldErrors });
@@ -45,11 +46,11 @@ export const createProduct = async (req: Request, res: Response) => {
     let imageUrl: string | undefined;
     let images: string[] = [];
 
-    const files = (req as any).files as Express.Multer.File[] | undefined;
-    const singleFile = (req as any).file as Express.Multer.File | undefined;
+    const filesField = (req as any).files as MulterFiles | undefined;
+    const files = filesField?.images;
+    const singleFile = filesField?.image?.[0];
 
     if (files && files.length > 0) {
-      console.log("createProduct: uploading", files.length, "files to R2");
       const limited = files.slice(0, 5);
       const uploads = await Promise.all(
         limited.map((file) =>
@@ -61,10 +62,11 @@ export const createProduct = async (req: Request, res: Response) => {
           })
         )
       );
+
       images = uploads.map((u) => u.url);
       imageUrl = images[0];
     } else if (singleFile) {
-      console.log("createProduct: uploading single file to R2");
+      // fallback single "image" field
       const file = singleFile;
       const { url } = await uploadToR2({
         buffer: file.buffer,
@@ -76,21 +78,16 @@ export const createProduct = async (req: Request, res: Response) => {
       images = [url];
     }
 
-    console.log("createProduct: creating Product in Mongo", {
-      ...parsed.data,
-      imageUrl,
-      images,
-    });
-
     const prod = await Product.create({
       name: parsed.data.name,
       description: parsed.data.description,
       price: parsed.data.price,
       imageUrl,
       images,
+      // allow creating as popular if provided
+      isPopular: parsed.data.isPopular ?? false,
     });
 
-    console.log("createProduct: created product", prod._id);
     return res.status(201).json({ product: prod });
   } catch (err: any) {
     console.error("createProduct error:", err);
@@ -201,8 +198,9 @@ export const updateProduct = async (req: Request, res: Response) => {
     const p = await Product.findById(req.params.id);
     if (!p) return res.status(404).json({ message: "Not found" });
 
-    const files = (req as any).files as Express.Multer.File[] | undefined;
-    const singleFile = (req as any).file as Express.Multer.File | undefined;
+    const filesField = (req as any).files as MulterFiles | undefined;
+    const files = filesField?.images;
+    const singleFile = filesField?.image?.[0];
 
     if (files && files.length > 0) {
       const limited = files.slice(0, 5);
@@ -261,7 +259,10 @@ export const deleteProduct = async (req: Request, res: Response) => {
 
 export const addSale = async (req: Request, res: Response) => {
   try {
-    const qty = Math.max(1, Number(req.query.qty) || 1);
+    const raw = Number(req.query.qty);
+    const qty =
+      Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1; // always at least 1, never NaN
+
     const p = await Product.findByIdAndUpdate(
       req.params.id,
       { $inc: { salesCount: qty } },
