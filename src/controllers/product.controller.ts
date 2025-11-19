@@ -30,8 +30,13 @@ const QuerySchema = z.object({
 // Create product – up to 5 images (from any file field)
 export const createProduct = async (req: Request, res: Response) => {
   try {
+    console.log('createProduct called');
+    console.log('Body:', req.body);
+    console.log('Files:', (req as any).files);
+
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
+      console.error('Validation error:', parsed.error.flatten().fieldErrors);
       return res
         .status(400)
         .json({ errors: parsed.error.flatten().fieldErrors });
@@ -43,20 +48,50 @@ export const createProduct = async (req: Request, res: Response) => {
     const files = (req as any).files as Express.Multer.File[] | undefined;
 
     if (files && files.length > 0) {
-      const limited = files.slice(0, 5);
-      const uploads = await Promise.all(
-        limited.map((file) =>
-          uploadToR2({
-            buffer: file.buffer,
-            mime: file.mimetype,
-            prefix: "products/",
-            ext: "." + (file.originalname.split(".").pop() || "bin"),
-          })
-        )
-      );
+      console.log(`Processing ${files.length} file(s)`);
+      
+      // Filter only image files
+      const imageFiles = files.filter(f => {
+        const isImage = f.mimetype.startsWith('image/');
+        if (!isImage) {
+          console.warn(`Skipping non-image file: ${f.originalname} (${f.mimetype})`);
+        }
+        return isImage;
+      });
 
-      images = uploads.map((u) => u.url);
-      imageUrl = images[0];
+      if (imageFiles.length === 0) {
+        console.warn('No valid image files found');
+      } else {
+        // Limit to 5 images
+        const limited = imageFiles.slice(0, 5);
+        console.log(`Uploading ${limited.length} image(s) to R2`);
+
+        try {
+          const uploads = await Promise.all(
+            limited.map((file, index) => {
+              console.log(`  Uploading file ${index + 1}: ${file.originalname}`);
+              return uploadToR2({
+                buffer: file.buffer,
+                mime: file.mimetype,
+                prefix: "products/",
+                ext: "." + (file.originalname.split(".").pop() || "bin"),
+              });
+            })
+          );
+
+          images = uploads.map((u) => u.url);
+          imageUrl = images[0];
+          console.log('Upload successful:', images);
+        } catch (uploadErr: any) {
+          console.error('R2 upload error:', uploadErr);
+          return res.status(500).json({ 
+            message: "Failed to upload images", 
+            error: uploadErr?.message 
+          });
+        }
+      }
+    } else {
+      console.log('No files received');
     }
 
     const prod = await Product.create({
@@ -68,6 +103,7 @@ export const createProduct = async (req: Request, res: Response) => {
       isPopular: parsed.data.isPopular ?? false,
     });
 
+    console.log('Product created:', prod._id);
     return res.status(201).json({ product: prod });
   } catch (err: any) {
     console.error("createProduct error:", err);
@@ -168,39 +204,79 @@ export const getProduct = async (req: Request, res: Response) => {
 // Update product – up to 5 images (from any file field)
 export const updateProduct = async (req: Request, res: Response) => {
   try {
+    console.log('updateProduct called for ID:', req.params.id);
+    console.log('Body:', req.body);
+    console.log('Files:', (req as any).files);
+
     const parsed = UpdateSchema.safeParse(req.body);
     if (!parsed.success) {
+      console.error('Validation error:', parsed.error.flatten().fieldErrors);
       return res
         .status(400)
         .json({ errors: parsed.error.flatten().fieldErrors });
     }
 
     const p = await Product.findById(req.params.id);
-    if (!p) return res.status(404).json({ message: "Not found" });
+    if (!p) {
+      console.log('Product not found:', req.params.id);
+      return res.status(404).json({ message: "Not found" });
+    }
 
     const files = (req as any).files as Express.Multer.File[] | undefined;
 
     if (files && files.length > 0) {
-      const limited = files.slice(0, 5);
-      const uploads = await Promise.all(
-        limited.map((file) =>
-          uploadToR2({
-            buffer: file.buffer,
-            mime: file.mimetype,
-            prefix: "products/",
-            ext: "." + (file.originalname.split(".").pop() || "bin"),
-          })
-        )
-      );
+      console.log(`Processing ${files.length} file(s) for update`);
+      
+      // Filter only image files
+      const imageFiles = files.filter(f => {
+        const isImage = f.mimetype.startsWith('image/');
+        if (!isImage) {
+          console.warn(`Skipping non-image file: ${f.originalname} (${f.mimetype})`);
+        }
+        return isImage;
+      });
 
-      const urls = uploads.map((u) => u.url);
-      p.imageUrl = urls[0];
-      (p as any).images = urls;
+      if (imageFiles.length > 0) {
+        // Limit to 5 images
+        const limited = imageFiles.slice(0, 5);
+        console.log(`Uploading ${limited.length} image(s) to R2`);
+
+        try {
+          const uploads = await Promise.all(
+            limited.map((file, index) => {
+              console.log(`  Uploading file ${index + 1}: ${file.originalname}`);
+              return uploadToR2({
+                buffer: file.buffer,
+                mime: file.mimetype,
+                prefix: "products/",
+                ext: "." + (file.originalname.split(".").pop() || "bin"),
+              });
+            })
+          );
+
+          const urls = uploads.map((u) => u.url);
+          p.imageUrl = urls[0];
+          (p as any).images = urls;
+          console.log('Upload successful:', urls);
+        } catch (uploadErr: any) {
+          console.error('R2 upload error:', uploadErr);
+          return res.status(500).json({ 
+            message: "Failed to upload images", 
+            error: uploadErr?.message 
+          });
+        }
+      } else {
+        console.log('No valid image files found, keeping existing images');
+      }
+    } else {
+      console.log('No files received, keeping existing images');
     }
-    // if no files: keep existing images
 
+    // Update other fields
     Object.assign(p, parsed.data);
     await p.save();
+    
+    console.log('Product updated:', p._id);
     res.json({ product: p });
   } catch (err: any) {
     console.error("updateProduct error:", err);
@@ -228,8 +304,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
 export const addSale = async (req: Request, res: Response) => {
   try {
     const raw = Number(req.query.qty);
-    const qty =
-      Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1; // at least 1, never NaN
+    const qty = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
 
     const p = await Product.findByIdAndUpdate(
       req.params.id,

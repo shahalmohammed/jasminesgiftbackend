@@ -8,38 +8,39 @@ import { requireRole } from "../middleware/requireRole";
 const router = Router();
 
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
-
-// Debug middleware - add this temporarily
-const debugRequest = (req: any, res: any, next: any) => {
-  console.log('=== REQUEST DEBUG ===');
-  console.log('Content-Type:', req.headers['content-type']);
-  console.log('Body keys:', Object.keys(req.body));
-  console.log('Body:', req.body);
-  next();
-};
-
-// Multer error handler
-const handleMulterError = (err: any, req: any, res: any, next: any) => {
-  if (err instanceof multer.MulterError) {
-    console.error('Multer Error:', err.code, err.field);
-    return res.status(400).json({ 
-      error: 'File upload error', 
-      code: err.code,
-      field: err.field,
-      message: err.message 
-    });
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit per file
   }
-  next(err);
-};
+});
 
-const uploadAny = (req: any, res: any, next: any) => {
-  upload.any()(req, res, (err) => {
-    if (err) {
-      console.error('Upload error:', err);
-      return handleMulterError(err, req, res, next);
+// Custom middleware to handle upload with better error handling
+const handleUpload = (req: any, res: any, next: any) => {
+  const uploadMiddleware = upload.any();
+  
+  uploadMiddleware(req, res, (err: any) => {
+    if (err instanceof multer.MulterError) {
+      console.error('Multer error:', err);
+      return res.status(400).json({ 
+        error: 'File upload error',
+        details: err.message,
+        code: err.code 
+      });
+    } else if (err) {
+      console.error('Unknown upload error:', err);
+      return res.status(500).json({ 
+        error: 'Upload failed',
+        details: err.message 
+      });
     }
-    console.log('Files received:', req.files);
+    
+    // Log what we received
+    console.log('Files received:', req.files?.length || 0);
+    if (req.files) {
+      req.files.forEach((f: any) => console.log('  -', f.fieldname, f.originalname));
+    }
+    
     next();
   });
 };
@@ -54,8 +55,7 @@ router.post(
   "/",
   requireAuth,
   requireRole(["admin"]),
-  debugRequest,  // Add debug
-  uploadAny,
+  handleUpload,
   Product.createProduct
 );
 
@@ -63,8 +63,7 @@ router.patch(
   "/:id",
   requireAuth,
   requireRole(["admin"]),
-  debugRequest,  // Add debug
-  uploadAny,
+  handleUpload,
   Product.updateProduct
 );
 
