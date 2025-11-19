@@ -7,16 +7,17 @@ import { requireRole } from "../middleware/requireRole";
 
 const router = Router();
 
-// Multer: accept any file field; controller will limit to 5 images
 const storage = multer.memoryStorage();
-const upload = multer({ storage }).any();
+
+// accept up to 5 files from field name "images"
+const upload = multer({ storage }).array("images", 5);
 
 // Public routes
 router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-// Admin routes – note `upload` only on create / update
+// Admin routes
 router.post(
   "/",
   requireAuth,
