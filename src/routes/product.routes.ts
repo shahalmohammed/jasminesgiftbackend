@@ -7,14 +7,20 @@ import { requireRole } from "../middleware/requireRole";
 const upload = multer({ storage: multer.memoryStorage() });
 const router = Router();
 
+// Configure multer to accept both "images" and "image" field names
+const uploadImages = upload.fields([
+    { name: 'images', maxCount: 5 },
+    { name: 'image', maxCount: 5 }
+]);
+
 // Public routes
 router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-// Admin routes - use upload.array("images", 5) for multiple images
-router.post("/", requireAuth, requireRole(["admin"]), upload.array("images", 5), Product.createProduct);
-router.patch("/:id", requireAuth, requireRole(["admin"]), upload.array("images", 5), Product.updateProduct);
+// Admin routes - accepts both "images" and "image" field names
+router.post("/", requireAuth, requireRole(["admin"]), uploadImages, Product.createProduct);
+router.patch("/:id", requireAuth, requireRole(["admin"]), uploadImages, Product.updateProduct);
 router.patch("/:id/toggle-popular", requireAuth, requireRole(["admin"]), Product.togglePopular);
 
 // Image management routes
