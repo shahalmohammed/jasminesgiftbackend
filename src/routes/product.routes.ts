@@ -1,4 +1,4 @@
-// src/routes/products.ts
+// src/routes/product.routes.ts
 import { Router } from "express";
 import multer from "multer";
 import * as Product from "../controllers/product.controller";
@@ -12,7 +12,7 @@ router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-// CREATE — allow up to 5 images under field name "images"
+// up to 5 images via "images" field
 router.post(
   "/",
   requireAuth,
@@ -21,7 +21,6 @@ router.post(
   Product.createProduct
 );
 
-// UPDATE — allow up to 5 images under field name "images"
 router.patch(
   "/:id",
   requireAuth,

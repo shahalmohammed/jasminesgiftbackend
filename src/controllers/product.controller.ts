@@ -27,8 +27,12 @@ const QuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(10),
 });
 
-// Create product – up to 5 images
+// CREATE PRODUCT – up to 5 images
 export const createProduct = async (req: Request, res: Response) => {
+  console.log("createProduct hit, body keys:", Object.keys(req.body || {}));
+  console.log("createProduct files:", (req as any).files);
+  console.log("createProduct file:", (req as any).file);
+
   try {
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -55,11 +59,10 @@ export const createProduct = async (req: Request, res: Response) => {
           })
         )
       );
-
       images = uploads.map((u) => u.url);
       imageUrl = images[0];
     } else if (singleFile) {
-      // fallback if some client still sends single "image"
+      // backward compatibility if something still sends a single image
       const file = singleFile;
       const { url } = await uploadToR2({
         buffer: file.buffer,
@@ -77,6 +80,7 @@ export const createProduct = async (req: Request, res: Response) => {
       price: parsed.data.price,
       imageUrl,
       images,
+      isPopular: parsed.data.isPopular ?? false,
     });
 
     return res.status(201).json({ product: prod });
@@ -88,6 +92,7 @@ export const createProduct = async (req: Request, res: Response) => {
   }
 };
 
+// LIST PRODUCTS
 export const listProducts = async (req: Request, res: Response) => {
   try {
     const parsed = QuerySchema.safeParse(req.query);
@@ -127,6 +132,7 @@ export const listProducts = async (req: Request, res: Response) => {
   }
 };
 
+// POPULAR PRODUCTS
 export const getPopularProducts = async (_req: Request, res: Response) => {
   try {
     const items = await Product.find({ isActive: true, isPopular: true }).sort(
@@ -141,6 +147,7 @@ export const getPopularProducts = async (_req: Request, res: Response) => {
   }
 };
 
+// TOGGLE POPULAR
 export const togglePopular = async (req: Request, res: Response) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -163,6 +170,7 @@ export const togglePopular = async (req: Request, res: Response) => {
   }
 };
 
+// GET SINGLE PRODUCT
 export const getProduct = async (req: Request, res: Response) => {
   try {
     const p = await Product.findById(req.params.id);
@@ -176,8 +184,13 @@ export const getProduct = async (req: Request, res: Response) => {
   }
 };
 
-// Update product – up to 5 images
+// UPDATE PRODUCT – up to 5 images
 export const updateProduct = async (req: Request, res: Response) => {
+  console.log("updateProduct hit, params:", req.params);
+  console.log("updateProduct body keys:", Object.keys(req.body || {}));
+  console.log("updateProduct files:", (req as any).files);
+  console.log("updateProduct file:", (req as any).file);
+
   try {
     const parsed = UpdateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -204,7 +217,6 @@ export const updateProduct = async (req: Request, res: Response) => {
           })
         )
       );
-
       const urls = uploads.map((u) => u.url);
       p.imageUrl = urls[0];
       (p as any).images = urls;
@@ -219,7 +231,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       p.imageUrl = url;
       (p as any).images = [url];
     }
-    // if no files: keep existing images
+    // if no files → keep existing images
 
     Object.assign(p, parsed.data);
     await p.save();
@@ -232,6 +244,7 @@ export const updateProduct = async (req: Request, res: Response) => {
   }
 };
 
+// DELETE PRODUCT
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const p = await Product.findById(req.params.id);
@@ -247,6 +260,7 @@ export const deleteProduct = async (req: Request, res: Response) => {
   }
 };
 
+// RECORD A SALE
 export const addSale = async (req: Request, res: Response) => {
   try {
     const qty = Math.max(1, Number(req.query.qty) || 1);
