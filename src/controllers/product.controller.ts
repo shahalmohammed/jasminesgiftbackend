@@ -27,15 +27,16 @@ const QuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(10),
 });
 
-// CREATE PRODUCT – up to 5 images
+// Create product – up to 5 images
 export const createProduct = async (req: Request, res: Response) => {
-  console.log("createProduct hit, body keys:", Object.keys(req.body || {}));
-  console.log("createProduct files:", (req as any).files);
-  console.log("createProduct file:", (req as any).file);
-
   try {
+    console.log("createProduct: incoming body", req.body);
+    console.log("createProduct: incoming files", (req as any).files);
+    console.log("createProduct: incoming file (single)", (req as any).file);
+
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
+      console.error("createProduct: validation error", parsed.error.format());
       return res
         .status(400)
         .json({ errors: parsed.error.flatten().fieldErrors });
@@ -48,6 +49,7 @@ export const createProduct = async (req: Request, res: Response) => {
     const singleFile = (req as any).file as Express.Multer.File | undefined;
 
     if (files && files.length > 0) {
+      console.log("createProduct: uploading", files.length, "files to R2");
       const limited = files.slice(0, 5);
       const uploads = await Promise.all(
         limited.map((file) =>
@@ -62,7 +64,7 @@ export const createProduct = async (req: Request, res: Response) => {
       images = uploads.map((u) => u.url);
       imageUrl = images[0];
     } else if (singleFile) {
-      // backward compatibility if something still sends a single image
+      console.log("createProduct: uploading single file to R2");
       const file = singleFile;
       const { url } = await uploadToR2({
         buffer: file.buffer,
@@ -74,15 +76,21 @@ export const createProduct = async (req: Request, res: Response) => {
       images = [url];
     }
 
+    console.log("createProduct: creating Product in Mongo", {
+      ...parsed.data,
+      imageUrl,
+      images,
+    });
+
     const prod = await Product.create({
       name: parsed.data.name,
       description: parsed.data.description,
       price: parsed.data.price,
       imageUrl,
       images,
-      isPopular: parsed.data.isPopular ?? false,
     });
 
+    console.log("createProduct: created product", prod._id);
     return res.status(201).json({ product: prod });
   } catch (err: any) {
     console.error("createProduct error:", err);
@@ -92,7 +100,6 @@ export const createProduct = async (req: Request, res: Response) => {
   }
 };
 
-// LIST PRODUCTS
 export const listProducts = async (req: Request, res: Response) => {
   try {
     const parsed = QuerySchema.safeParse(req.query);
@@ -132,7 +139,6 @@ export const listProducts = async (req: Request, res: Response) => {
   }
 };
 
-// POPULAR PRODUCTS
 export const getPopularProducts = async (_req: Request, res: Response) => {
   try {
     const items = await Product.find({ isActive: true, isPopular: true }).sort(
@@ -147,7 +153,6 @@ export const getPopularProducts = async (_req: Request, res: Response) => {
   }
 };
 
-// TOGGLE POPULAR
 export const togglePopular = async (req: Request, res: Response) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -170,7 +175,6 @@ export const togglePopular = async (req: Request, res: Response) => {
   }
 };
 
-// GET SINGLE PRODUCT
 export const getProduct = async (req: Request, res: Response) => {
   try {
     const p = await Product.findById(req.params.id);
@@ -184,13 +188,8 @@ export const getProduct = async (req: Request, res: Response) => {
   }
 };
 
-// UPDATE PRODUCT – up to 5 images
+// Update product – up to 5 images
 export const updateProduct = async (req: Request, res: Response) => {
-  console.log("updateProduct hit, params:", req.params);
-  console.log("updateProduct body keys:", Object.keys(req.body || {}));
-  console.log("updateProduct files:", (req as any).files);
-  console.log("updateProduct file:", (req as any).file);
-
   try {
     const parsed = UpdateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -217,6 +216,7 @@ export const updateProduct = async (req: Request, res: Response) => {
           })
         )
       );
+
       const urls = uploads.map((u) => u.url);
       p.imageUrl = urls[0];
       (p as any).images = urls;
@@ -231,7 +231,7 @@ export const updateProduct = async (req: Request, res: Response) => {
       p.imageUrl = url;
       (p as any).images = [url];
     }
-    // if no files → keep existing images
+    // if no files: keep existing images
 
     Object.assign(p, parsed.data);
     await p.save();
@@ -244,7 +244,6 @@ export const updateProduct = async (req: Request, res: Response) => {
   }
 };
 
-// DELETE PRODUCT
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
     const p = await Product.findById(req.params.id);
@@ -260,7 +259,6 @@ export const deleteProduct = async (req: Request, res: Response) => {
   }
 };
 
-// RECORD A SALE
 export const addSale = async (req: Request, res: Response) => {
   try {
     const qty = Math.max(1, Number(req.query.qty) || 1);
