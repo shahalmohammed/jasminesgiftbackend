@@ -43,12 +43,20 @@ const auth_1 = require("../middleware/auth");
 const requireRole_1 = require("../middleware/requireRole");
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
 const router = (0, express_1.Router)();
+
 router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
+
 router.post("/", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), upload.single("image"), Product.createProduct);
+
 router.patch("/:id", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), upload.single("image"), Product.updateProduct);
+
+// NEW: add extra images (one per request) to a product
+router.post("/:id/images", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), upload.single("image"), Product.addProductImage);
+
 router.patch("/:id/toggle-popular", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), Product.togglePopular);
 router.delete("/:id", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), Product.deleteProduct);
 router.post("/:id/sell", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), Product.addSale);
+
 exports.default = router;
