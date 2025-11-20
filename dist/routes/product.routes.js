@@ -1,62 +1,53 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const express_1 = require("express");
-const multer_1 = __importDefault(require("multer"));
-const Product = __importStar(require("../controllers/product.controller"));
-const auth_1 = require("../middleware/auth");
-const requireRole_1 = require("../middleware/requireRole");
-const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
-const router = (0, express_1.Router)();
+const { Router } = require("express");
+const multer = require("multer");
+const Product = require("../controllers/product.controller");
+const { requireAuth } = require("../middleware/auth");
+const { requireRole } = require("../middleware/requireRole");
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+const router = Router();
 
 router.get("/", Product.listProducts);
 router.get("/popular", Product.getPopularProducts);
 router.get("/:id", Product.getProduct);
 
-router.post("/", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), upload.single("image"), Product.createProduct);
+router.post(
+  "/",
+  requireAuth,
+  requireRole(["admin"]),
+  upload.array("images", 5),       // <--- multiple images
+  Product.createProduct
+);
 
-router.patch("/:id", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), upload.single("image"), Product.updateProduct);
+router.patch(
+  "/:id",
+  requireAuth,
+  requireRole(["admin"]),
+  upload.array("images", 5),       // <--- multiple images
+  Product.updateProduct
+);
 
-// NEW: add extra images (one per request) to a product
-router.post("/:id/images", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), upload.single("image"), Product.addProductImage);
+router.patch(
+  "/:id/toggle-popular",
+  requireAuth,
+  requireRole(["admin"]),
+  Product.togglePopular
+);
 
-router.patch("/:id/toggle-popular", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), Product.togglePopular);
-router.delete("/:id", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), Product.deleteProduct);
-router.post("/:id/sell", auth_1.requireAuth, (0, requireRole_1.requireRole)(["admin"]), Product.addSale);
+router.delete(
+  "/:id",
+  requireAuth,
+  requireRole(["admin"]),
+  Product.deleteProduct
+);
 
-exports.default = router;
+router.post(
+  "/:id/sell",
+  requireAuth,
+  requireRole(["admin"]),
+  Product.addSale
+);
+
+module.exports = router;
