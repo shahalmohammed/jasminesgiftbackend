@@ -8,11 +8,19 @@ export interface AuthRequest extends Request {
 
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) return res.status(401).json({ message: "Unauthorized auth" });
+  if (!header?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Unauthorized auth" });
+  }
 
   const token = header.slice("Bearer ".length);
-  const payload = verifyJwt<AppJwtPayload>(token); // <-- typed
-  req.userId = payload.sub;
-  req.userRole = payload.role;
-  next();
+
+  try {
+    const payload = verifyJwt<AppJwtPayload>(token);  // your typed verify
+    req.userId = payload.sub;
+    req.userRole = payload.role;
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid or malformed token" });
+  }
 }
+

@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { z } from "zod";
-import path from "path";
 import { Product } from "../models/Product";
 import { uploadToR2 } from "../services/r2";
 
@@ -17,7 +16,7 @@ const UpdateSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   price: PriceField,
-  isActive: z.coerce.boolean().optional(),
+  isActive: z.boolean().optional(),
   isPopular: z.coerce.boolean().optional(),
 });
 
@@ -27,46 +26,38 @@ const QuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(10),
 });
 
-// POST /api/products  (multipart/form-data with "images")
+const MAX_IMAGES = 5;
+
 export const createProduct = async (req: Request, res: Response) => {
+  // expects multipart/form-data with: fields (name, description?, price?) and file "image" (optional)
   const parsed = CreateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
   }
 
-  const files = req.files as Express.Multer.File[] | undefined;
+  let imageUrls: string[] = [];
 
-  const imageUrls: Record<string, string> = {};
-
-  if (files && files.length > 0) {
-    const uploads = await Promise.all(
-      files.slice(0, 5).map((file) =>
-        uploadToR2({
-          buffer: file.buffer,
-          mime: file.mimetype,
-          prefix: "products/",
-          ext: path.extname(file.originalname) || undefined,
-        })
-      )
-    );
-
-    uploads.forEach((u, index) => {
-      imageUrls[`imageUrl${index + 1}`] = u.url;
+  const file = (req as any).file as Express.Multer.File | undefined;
+  if (file) {
+    const { url } = await uploadToR2({
+      buffer: file.buffer,
+      mime: file.mimetype,
+      prefix: "products/",
+      ext: "." + (file.originalname.split(".").pop() || "bin"),
     });
+    imageUrls.push(url); // primary image (slot 1)
   }
 
   const prod = await Product.create({
     name: parsed.data.name,
     description: parsed.data.description,
     price: parsed.data.price,
-    isPopular: parsed.data.isPopular ?? false,
-    ...imageUrls,
+    imageUrls,
   });
 
   return res.status(201).json({ product: prod });
 };
 
-// GET /api/products
 export const listProducts = async (req: Request, res: Response) => {
   const parsed = QuerySchema.safeParse(req.query);
   if (!parsed.success) {
@@ -89,10 +80,14 @@ export const listProducts = async (req: Request, res: Response) => {
     Product.countDocuments(filter),
   ]);
 
-  return res.json({ page, limit, total, items });
+  return res.json({
+    page,
+    limit,
+    total,
+    items,
+  });
 };
 
-// GET /api/products/popular
 export const getPopularProducts = async (_req: Request, res: Response) => {
   const items = await Product.find({ isActive: true, isPopular: true }).sort({
     createdAt: -1,
@@ -100,14 +95,32 @@ export const getPopularProducts = async (_req: Request, res: Response) => {
   return res.json({ items });
 };
 
-// GET /api/products/:id
+export const togglePopular = async (req: Request, res: Response) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: "Not found" });
+
+    product.isPopular = !product.isPopular;
+    await product.save();
+
+    res.json({
+      product,
+      message: `Product marked as ${
+        product.isPopular ? "popular" : "not popular"
+      }`,
+    });
+  } catch (err) {
+    console.error("Toggle popular error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 export const getProduct = async (req: Request, res: Response) => {
   const p = await Product.findById(req.params.id);
   if (!p) return res.status(404).json({ message: "Not found" });
   res.json({ product: p });
 };
 
-// PATCH /api/products/:id  (optional images)
 export const updateProduct = async (req: Request, res: Response) => {
   const parsed = UpdateSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -117,60 +130,41 @@ export const updateProduct = async (req: Request, res: Response) => {
   const p = await Product.findById(req.params.id);
   if (!p) return res.status(404).json({ message: "Not found" });
 
-  const files = req.files as Express.Multer.File[] | undefined;
+  // merge scalar fields
+  Object.assign(p, parsed.data);
 
-  // If new images are uploaded, overwrite imageUrl1..imageUrlN with new URLs
-  if (files && files.length > 0) {
-    const uploads = await Promise.all(
-      files.slice(0, 5).map((file) =>
-        uploadToR2({
-          buffer: file.buffer,
-          mime: file.mimetype,
-          prefix: "products/",
-          ext: path.extname(file.originalname) || undefined,
-        })
-      )
-    );
-
-    uploads.forEach((u, index) => {
-      (p as any)[`imageUrl${index + 1}`] = u.url;
+  // optional new primary image (replace slot 0)
+  const file = (req as any).file as Express.Multer.File | undefined;
+  if (file) {
+    const { url } = await uploadToR2({
+      buffer: file.buffer,
+      mime: file.mimetype,
+      prefix: "products/",
+      ext: "." + (file.originalname.split(".").pop() || "bin"),
     });
-  }
 
-  if (parsed.data.name !== undefined) p.name = parsed.data.name;
-  if (parsed.data.description !== undefined) p.description = parsed.data.description;
-  if (parsed.data.price !== undefined) p.price = parsed.data.price;
-  if (parsed.data.isActive !== undefined) p.isActive = parsed.data.isActive;
-  if (parsed.data.isPopular !== undefined) p.isPopular = parsed.data.isPopular;
+    let imageUrls = Array.isArray(p.imageUrls) ? [...p.imageUrls] : [];
+    if (imageUrls.length === 0) {
+      imageUrls.push(url);
+    } else {
+      imageUrls[0] = url; // replace first image
+    }
+    p.imageUrls = imageUrls.slice(0, MAX_IMAGES);
+  }
 
   await p.save();
   res.json({ product: p });
 };
 
-// PATCH /api/products/:id/toggle-popular
-export const togglePopular = async (req: Request, res: Response) => {
-  const product = await Product.findById(req.params.id);
-  if (!product) return res.status(404).json({ message: "Not found" });
-
-  product.isPopular = !product.isPopular;
-  await product.save();
-
-  res.json({
-    product,
-    message: `Product marked as ${product.isPopular ? "popular" : "not popular"}`,
-  });
-};
-
-// DELETE /api/products/:id
 export const deleteProduct = async (req: Request, res: Response) => {
   const p = await Product.findById(req.params.id);
   if (!p) return res.status(404).json({ message: "Not found" });
 
+  // If you later store R2 keys, delete them here via deleteFromR2(...)
   await p.deleteOne();
   res.json({ ok: true });
 };
 
-// POST /api/products/:id/sell?qty=2
 export const addSale = async (req: Request, res: Response) => {
   const qty = Math.max(1, Number(req.query.qty) || 1);
   const p = await Product.findByIdAndUpdate(
@@ -180,4 +174,40 @@ export const addSale = async (req: Request, res: Response) => {
   );
   if (!p) return res.status(404).json({ message: "Not found" });
   res.json({ product: p });
+};
+
+// NEW: add one image (image2, image3, etc.) via separate endpoint
+export const addProductImage = async (req: Request, res: Response) => {
+  const p = await Product.findById(req.params.id);
+  if (!p) return res.status(404).json({ message: "Not found" });
+
+  const file = (req as any).file as Express.Multer.File | undefined;
+  if (!file) {
+    return res.status(400).json({ message: "Image file is required" });
+  }
+
+  let imageUrls = Array.isArray(p.imageUrls) ? [...p.imageUrls] : [];
+
+  if (imageUrls.length >= MAX_IMAGES) {
+    return res.status(400).json({
+      message: `You can upload a maximum of ${MAX_IMAGES} images per product`,
+    });
+  }
+
+  const { url } = await uploadToR2({
+    buffer: file.buffer,
+    mime: file.mimetype,
+    prefix: "products/",
+    ext: "." + (file.originalname.split(".").pop() || "bin"),
+  });
+
+  imageUrls.push(url);
+  p.imageUrls = imageUrls.slice(0, MAX_IMAGES);
+  await p.save();
+
+  res.status(201).json({
+    product: p,
+    addedImageUrl: url,
+    imageCount: p.imageUrls.length,
+  });
 };
