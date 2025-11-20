@@ -11,7 +11,7 @@ export interface IProduct extends Document {
   imageUrl5?: string;
   salesCount: number;
   isActive: boolean;
-  isPopular?: boolean; 
+  isPopular?: boolean;
 }
 
 const productSchema = new Schema<IProduct>(
@@ -26,7 +26,7 @@ const productSchema = new Schema<IProduct>(
     imageUrl5: { type: String },
     salesCount: { type: Number, default: 0, index: true },
     isActive: { type: Boolean, default: true },
-    isPopular: { type: Boolean, default: false, index: true }, 
+    isPopular: { type: Boolean, default: false, index: true },
   },
   { timestamps: true }
 );
