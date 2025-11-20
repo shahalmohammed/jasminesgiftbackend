@@ -1,4 +1,5 @@
 "use strict";
+
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
@@ -8,12 +9,8 @@ const productSchema = new Schema(
     description: { type: String, trim: true },
     price: { type: Number, min: 0 },
 
-    // Up to 5 images (stored separately)
-    imageUrl1: String,
-    imageUrl2: String,
-    imageUrl3: String,
-    imageUrl4: String,
-    imageUrl5: String,
+    // Up to 5 image URLs
+    imageUrls: [{ type: String }],
 
     salesCount: { type: Number, default: 0, index: true },
     isActive: { type: Boolean, default: true },
@@ -22,7 +19,9 @@ const productSchema = new Schema(
   { timestamps: true }
 );
 
-// Search index
+// Search index (partial)
 productSchema.index({ name: "text", description: "text" });
 
-module.exports.Product = mongoose.model("Product", productSchema);
+const Product = mongoose.model("Product", productSchema);
+
+module.exports = { Product };

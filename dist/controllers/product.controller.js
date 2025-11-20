@@ -4,7 +4,7 @@ const { z } = require("zod");
 const { Product } = require("../models/Product");
 const { uploadToR2 } = require("../services/r2");
 
-// Zod validation
+// Common Zod fields
 const PriceField = z.coerce.number().min(0).optional();
 
 const CreateSchema = z.object({
@@ -28,24 +28,31 @@ const QuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(10),
 });
 
-
-// -------------------------------------------------------
-// CREATE PRODUCT (supports up to 5 images)
-// -------------------------------------------------------
-exports.createProduct = async (req, res) => {
+// POST /api/products
+// expects multipart/form-data with:
+//  - text fields: name, description?, price?
+//  - up to 5 files under field name "images"
+async function createProduct(req, res) {
   const parsed = CreateSchema.safeParse(req.body);
-  if (!parsed.success)
-    return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ errors: parsed.error.flatten().fieldErrors });
+  }
 
-  let imageUrls = [];
+  // Handle up to 5 uploaded images (Multer: upload.array("images", 5))
+  const imageUrls = [];
 
-  if (req.files && req.files.length > 0) {
-    for (const file of req.files.slice(0, 5)) {
+  if (Array.isArray(req.files) && req.files.length > 0) {
+    for (const file of req.files) {
+      const { buffer, mimetype, originalname } = file;
+      const ext = "." + (originalname.split(".").pop() || "bin");
+
       const { url } = await uploadToR2({
-        buffer: file.buffer,
-        mime: file.mimetype,
+        buffer,
+        mime: mimetype,
         prefix: "products/",
-        ext: "." + (file.originalname.split(".").pop() || "bin"),
+        ext,
       });
 
       imageUrls.push(url);
@@ -56,29 +63,26 @@ exports.createProduct = async (req, res) => {
     name: parsed.data.name,
     description: parsed.data.description,
     price: parsed.data.price,
-    imageUrl1: imageUrls[0],
-    imageUrl2: imageUrls[1],
-    imageUrl3: imageUrls[2],
-    imageUrl4: imageUrls[3],
-    imageUrl5: imageUrls[4],
+    imageUrls,
+    // isPopular is typically controlled via togglePopular, but you can include it:
+    isPopular: parsed.data.isPopular ?? false,
   });
 
   return res.status(201).json({ product: prod });
-};
+}
 
-
-// -------------------------------------------------------
-// LIST PRODUCTS WITH SEARCH + PAGINATION
-// -------------------------------------------------------
-exports.listProducts = async (req, res) => {
+// GET /api/products
+async function listProducts(req, res) {
   const parsed = QuerySchema.safeParse(req.query);
-  if (!parsed.success)
-    return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ errors: parsed.error.flatten().fieldErrors });
+  }
 
   const { search, page, limit } = parsed.data;
 
   const filter = {};
-
   if (search && search.trim()) {
     const regex = new RegExp(search.trim(), "i");
     filter.$or = [{ name: regex }, { description: regex }];
@@ -92,25 +96,24 @@ exports.listProducts = async (req, res) => {
     Product.countDocuments(filter),
   ]);
 
-  return res.json({ page, limit, total, items });
-};
+  return res.json({
+    page,
+    limit,
+    total,
+    items,
+  });
+}
 
-
-// -------------------------------------------------------
-// GET POPULAR PRODUCTS
-// -------------------------------------------------------
-exports.getPopularProducts = async (_req, res) => {
-  const items = await Product.find({ isActive: true, isPopular: true })
-    .sort({ createdAt: -1 });
-
+// GET /api/products/popular
+async function getPopularProducts(_req, res) {
+  const items = await Product.find({ isActive: true, isPopular: true }).sort({
+    createdAt: -1,
+  });
   return res.json({ items });
-};
+}
 
-
-// -------------------------------------------------------
-// TOGGLE POPULAR
-// -------------------------------------------------------
-exports.togglePopular = async (req, res) => {
+// PATCH /api/products/:id/toggle-popular
+async function togglePopular(req, res) {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Not found" });
@@ -120,76 +123,77 @@ exports.togglePopular = async (req, res) => {
 
     res.json({
       product,
-      message: `Product marked as ${product.isPopular ? "popular" : "not popular"}`,
+      message: `Product marked as ${
+        product.isPopular ? "popular" : "not popular"
+      }`,
     });
   } catch (err) {
     console.error("Toggle popular error:", err);
     res.status(500).json({ message: "Server error" });
   }
-};
+}
 
-
-// -------------------------------------------------------
-// GET SINGLE PRODUCT
-// -------------------------------------------------------
-exports.getProduct = async (req, res) => {
+// GET /api/products/:id
+async function getProduct(req, res) {
   const p = await Product.findById(req.params.id);
   if (!p) return res.status(404).json({ message: "Not found" });
-
   res.json({ product: p });
-};
+}
 
-
-// -------------------------------------------------------
-// UPDATE PRODUCT (replaces only uploaded images)
-// -------------------------------------------------------
-exports.updateProduct = async (req, res) => {
+// PATCH /api/products/:id
+// expects multipart/form-data with optional up to 5 new images under "images"
+async function updateProduct(req, res) {
   const parsed = UpdateSchema.safeParse(req.body);
-  if (!parsed.success)
-    return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ errors: parsed.error.flatten().fieldErrors });
+  }
 
   const p = await Product.findById(req.params.id);
   if (!p) return res.status(404).json({ message: "Not found" });
 
-  if (req.files && req.files.length > 0) {
-    let index = 1;
+  // If new images are uploaded, replace existing imageUrls array
+  if (Array.isArray(req.files) && req.files.length > 0) {
+    const newImageUrls = [];
 
-    for (const file of req.files.slice(0, 5)) {
+    for (const file of req.files) {
+      const { buffer, mimetype, originalname } = file;
+      const ext = "." + (originalname.split(".").pop() || "bin");
+
       const { url } = await uploadToR2({
-        buffer: file.buffer,
-        mime: file.mimetype,
+        buffer,
+        mime: mimetype,
         prefix: "products/",
-        ext: "." + (file.originalname.split(".").pop() || "bin"),
+        ext,
       });
 
-      p[`imageUrl${index}`] = url;
-      index++;
+      newImageUrls.push(url);
     }
+
+    p.imageUrls = newImageUrls;
+    // If you were saving keys, you could delete old ones here.
   }
 
   Object.assign(p, parsed.data);
+
   await p.save();
-
   res.json({ product: p });
-};
+}
 
-
-// -------------------------------------------------------
-// DELETE PRODUCT
-// -------------------------------------------------------
-exports.deleteProduct = async (req, res) => {
+// DELETE /api/products/:id
+async function deleteProduct(req, res) {
   const p = await Product.findById(req.params.id);
   if (!p) return res.status(404).json({ message: "Not found" });
 
+  // If you were storing R2 keys alongside URLs, delete them here.
   await p.deleteOne();
+
   res.json({ ok: true });
-};
+}
 
-
-// -------------------------------------------------------
-// ADD SALE (increments sale count)
-// -------------------------------------------------------
-exports.addSale = async (req, res) => {
+// POST /api/products/:id/sell?qty=1
+async function addSale(req, res) {
   const qty = Math.max(1, Number(req.query.qty) || 1);
 
   const p = await Product.findByIdAndUpdate(
@@ -201,4 +205,15 @@ exports.addSale = async (req, res) => {
   if (!p) return res.status(404).json({ message: "Not found" });
 
   res.json({ product: p });
+}
+
+module.exports = {
+  createProduct,
+  listProducts,
+  getPopularProducts,
+  togglePopular,
+  getProduct,
+  updateProduct,
+  deleteProduct,
+  addSale,
 };
