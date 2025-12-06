@@ -9,8 +9,15 @@ const productSchema = new Schema(
     description: { type: String, trim: true },
     price: { type: Number, min: 0 },
 
-    // Up to 5 image URLs
-    imageUrls: [{ type: String }],
+    // Up to 15 image URLs
+    imageUrls: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (arr) => arr.length <= 15,
+        message: "Maximum 15 images allowed.",
+      },
+    },
 
     salesCount: { type: Number, default: 0, index: true },
     isActive: { type: Boolean, default: true },

@@ -24,7 +24,7 @@ router.post(
   "/",
   requireAuth,
   requireRole(["admin"]),
-  upload.array("images", 5),
+  upload.array("images", 15),
   ProductController.createProduct
 );
 
@@ -33,7 +33,7 @@ router.patch(
   "/:id",
   requireAuth,
   requireRole(["admin"]),
-  upload.array("images", 5),
+  upload.array("images", 15),
   ProductController.updateProduct
 );
 
