@@ -3,6 +3,19 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
+const reviewSchema = new Schema(
+  {
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, trim: true, maxlength: 2000 },
+
+    // If you have users:
+    user: { type: Schema.Types.ObjectId, ref: "User" },
+
+    // If you want guest reviews too:
+    customerName: { type: String, trim: true, maxlength: 120 },
+  },
+  { timestamps: true }
+);
 const productSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },

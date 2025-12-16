@@ -123,9 +123,8 @@ async function togglePopular(req, res) {
 
     res.json({
       product,
-      message: `Product marked as ${
-        product.isPopular ? "popular" : "not popular"
-      }`,
+      message: `Product marked as ${product.isPopular ? "popular" : "not popular"
+        }`,
     });
   } catch (err) {
     console.error("Toggle popular error:", err);
@@ -207,6 +206,87 @@ async function addSale(req, res) {
   res.json({ product: p });
 }
 
+const AddReviewSchema = z.object({
+  rating: z.coerce.number().int().min(1).max(5),
+  comment: z.string().trim().min(1).max(2000).optional(),
+  customerName: z.string().trim().min(1).max(120).optional(),
+});
+
+async function addReview(req, res) {
+  const parsed = AddReviewSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+  }
+
+  const p = await Product.findById(req.params.id);
+  if (!p) return res.status(404).json({ message: "Not found" });
+
+  // Optional: only allow reviews on active products
+  if (!p.isActive) return res.status(400).json({ message: "Product inactive" });
+
+  // If you requireAuth and have req.user:
+  const userId = req.user?._id;
+
+  // Optional: one review per user
+  if (userId && p.reviews.some((r) => String(r.user) === String(userId))) {
+    return res.status(400).json({ message: "You already reviewed this product" });
+  }
+
+  p.reviews.push({
+    rating: parsed.data.rating,
+    comment: parsed.data.comment,
+    customerName: parsed.data.customerName,
+    user: userId,
+  });
+
+  // Recompute summary (simple + safe)
+  const count = p.reviews.length;
+  const sum = p.reviews.reduce((acc, r) => acc + (r.rating || 0), 0);
+  p.ratingsCount = count;
+  p.averageRating = count ? Math.round((sum / count) * 10) / 10 : 0; // 1 decimal
+
+  await p.save();
+  return res.status(201).json({
+    productId: p._id,
+    averageRating: p.averageRating,
+    ratingsCount: p.ratingsCount,
+    review: p.reviews[p.reviews.length - 1],
+  });
+}
+
+// GET /api/products/:id/reviews
+const ReviewQuerySchema = z.object({
+  page: z.coerce.number().min(1).default(1),
+  limit: z.coerce.number().min(1).max(50).default(10),
+});
+
+async function listReviews(req, res) {
+  const parsed = ReviewQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+  }
+
+  const { page, limit } = parsed.data;
+
+  const p = await Product.findById(req.params.id).select("reviews averageRating ratingsCount");
+  if (!p) return res.status(404).json({ message: "Not found" });
+
+  const total = p.reviews.length;
+
+  // newest first
+  const sorted = [...p.reviews].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const items = sorted.slice((page - 1) * limit, (page - 1) * limit + limit);
+
+  return res.json({
+    page,
+    limit,
+    total,
+    averageRating: p.averageRating,
+    ratingsCount: p.ratingsCount,
+    items,
+  });
+}
+
 module.exports = {
   createProduct,
   listProducts,
@@ -216,4 +296,6 @@ module.exports = {
   updateProduct,
   deleteProduct,
   addSale,
+  addReview,
+  listReviews,
 };

@@ -61,4 +61,11 @@ router.post(
   ProductController.addSale
 );
 
+// Public: list reviews
+router.get("/:id/reviews", ProductController.listReviews);
+
+// Customer review (choose one)
+// Option A: allow guests (no auth)
+router.post("/:id/reviews", ProductController.addReview);
+
 module.exports = router;
