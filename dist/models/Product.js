@@ -8,21 +8,21 @@ const reviewSchema = new Schema(
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, trim: true, maxlength: 2000 },
 
-    // If you have users:
+    // optional (if logged in)
     user: { type: Schema.Types.ObjectId, ref: "User" },
 
-    // If you want guest reviews too:
+    // optional (if guest)
     customerName: { type: String, trim: true, maxlength: 120 },
   },
   { timestamps: true }
 );
+
 const productSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     description: { type: String, trim: true },
     price: { type: Number, min: 0 },
 
-    // Up to 15 image URLs
     imageUrls: {
       type: [String],
       default: [],
@@ -32,6 +32,13 @@ const productSchema = new Schema(
       },
     },
 
+    // review summary
+    averageRating: { type: Number, default: 0, min: 0, max: 5, index: true },
+    ratingsCount: { type: Number, default: 0, min: 0, index: true },
+
+    // embedded reviews
+    reviews: { type: [reviewSchema], default: [] },
+
     salesCount: { type: Number, default: 0, index: true },
     isActive: { type: Boolean, default: true },
     isPopular: { type: Boolean, default: false, index: true },
@@ -39,9 +46,7 @@ const productSchema = new Schema(
   { timestamps: true }
 );
 
-// Search index (partial)
 productSchema.index({ name: "text", description: "text" });
 
 const Product = mongoose.model("Product", productSchema);
-
 module.exports = { Product };
